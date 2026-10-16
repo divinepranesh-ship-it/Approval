@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Retrieve environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-# Comma-separated list of Telegram numeric User IDs allowed to use /list (e.g., "123456789,987654321")
+# Comma-separated list of Telegram numeric User IDs allowed to use /list (e.g., "123456789")
 ADMIN_USER_IDS = [int(uid.strip()) for uid in os.getenv("ADMIN_USER_IDS", "").split(",") if uid.strip().isdigit()]
 
 # Temporary in-memory dictionary to track ongoing join requests: user_id -> chat_id
@@ -66,15 +66,14 @@ def save_user_to_db(user_id, username, mobile_number):
     conn.close()
 
 # --- HANDLERS ---
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ignored or answered minimally in private chat without unsolicited texts."""
-    # Only acknowledge if requested privately, but do not trigger group actions or spam
-    await update.message.reply_text(
-        "👋 Bot is active. To join our group, please submit a join request through the official group link."
-    )
+    """Ignores /start command entirely to prevent any unwanted bot spam."""
+    # Deliberately left blank so the bot never replies when a user starts it.
+    return
 
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Triggers only when a user requests to join the group."""
+    """Triggers only when a user requests to join the group via invite link."""
     join_request = update.chat_join_request
     user = join_request.from_user
     chat = join_request.chat
@@ -114,7 +113,16 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id in pending_requests:
             chat_id = pending_requests[user_id]
             mobile_number = contact.phone_number
-            username = f"@{user.username}" if user.username else user.full_name
+            
+            # Capture robust username representation (handling emojis, custom fonts, symbols, and full names)
+            full_name = user.full_name or "Unknown User"
+            username_handle = f"@{user.username}" if user.username else ""
+            
+            # Combine handle and display name to preserve unique fonts, symbols, and emojis safely
+            if username_handle:
+                display_username = f"{full_name} ({username_handle})"
+            else:
+                display_username = full_name
 
             try:
                 # 1. Automatically approve entry request
@@ -123,7 +131,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
 
                 # 2. Save user details to SQLite database
-                save_user_to_db(user_id, username, mobile_number)
+                save_user_to_db(user_id, display_username, mobile_number)
 
                 await message.reply_text(
                     "✅ Verification successful! Your request has been approved. Welcome to the group!",
@@ -132,7 +140,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 # Clean up memory mapping
                 del pending_requests[user_id]
-                logger.info(f"Successfully approved and logged user {username} ({user_id})")
+                logger.info(f"Successfully approved and logged user {display_username} ({user_id})")
 
             except Exception as e:
                 logger.error(f"Failed to approve user {user_id}: {e}")
@@ -152,11 +160,25 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Generates and sends an Excel list of verified members. Restricted to bot owners/admins."""
-    user_id = update.effective_user.id
+    """Generates and sends an Excel list of verified members. Restricted strictly to bot DM & owner ID."""
+    message = update.message
+    chat = update.effective_chat
+    user = update.effective_user
 
-    if ADMIN_USER_IDS and user_id not in ADMIN_USER_IDS:
-        await update.message.reply_text("⛔ You are not authorized to use this command.")
+    if not user or not message:
+        return
+
+    # Ensure command is sent strictly via Private Chat (DM), not inside a group
+    if chat.type != "private":
+        # Silently ignore or delete command attempts inside public groups to protect owner privacy
+        return
+
+    # Check admin authorization
+    if ADMIN_USER_IDS and user.id not in ADMIN_USER_IDS:
+        await message.reply_text(
+            f"⛔ You are not authorized to use this command.\nYour User ID is: `{user.id}`",
+            parse_mode="Markdown"
+        )
         return
 
     # Fetch data from SQLite
@@ -167,10 +189,10 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
     if not rows:
-        await update.message.reply_text("📂 No verified users found in the database yet.")
+        await message.reply_text("📂 No verified users found in the database yet.")
         return
 
-    # Create Excel Workbook using openpyxl
+    # Create Excel Workbook using openpyxl with UTF-8 support for fonts/emojis
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Verified Members"
@@ -187,18 +209,18 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_path = "verified_members.xlsx"
     wb.save(file_path)
 
-    # Send document to admin
+    # Send document to admin DM
     try:
         with open(file_path, "rb") as f:
-            await update.message.reply_document(
+            await message.reply_document(
                 document=InputFile(f, filename="verified_members.xlsx"),
                 caption="📊 Here is the latest list of verified group members."
             )
     except Exception as e:
+    # Clean up local file copy
         logger.error(f"Failed to send Excel file: {e}")
-        await update.message.reply_text("⚠️ Failed to generate or send the spreadsheet file.")
+        await message.reply_text("⚠️ Failed to generate or send the spreadsheet file.")
         
-    # Clean up local file copy if needed
     if os.path.exists(file_path):
         os.remove(file_path)
 
@@ -215,7 +237,7 @@ def main():
     application.add_handler(ChatJoinRequestHandler(handle_join_request))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 
-    logger.info("Bot is running with Excel tracking enabled...")
+    logger.info("Bot is running with silent start and strict DM admin command settings...")
     application.run_polling()
 
 if __name__ == "__main__":

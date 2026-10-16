@@ -163,7 +163,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Generates and sends an Excel list of verified members. Restricted strictly to bot DM & owner ID."""
+    """Generates and sends an Excel list. Strictly silent for non-admins or group chats."""
     message = update.message
     chat = update.effective_chat
     user = update.effective_user
@@ -171,16 +171,8 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user or not message:
         return
 
-    # Ensure command is sent strictly via Private Chat (DM), not inside a group
-    if chat.type != "private":
-        return
-
-    # Check admin authorization
-    if ADMIN_USER_IDS and user.id not in ADMIN_USER_IDS:
-        await message.reply_text(
-            f"⛔ You are not authorized to use this command.\nYour User ID is: `{user.id}`",
-            parse_mode="Markdown"
-        )
+    # If command is used inside a group OR user is not an admin, ignore completely (zero messages)
+    if chat.type != "private" or (ADMIN_USER_IDS and user.id not in ADMIN_USER_IDS):
         return
 
     # Fetch data from SQLite
@@ -238,7 +230,7 @@ def main():
     application.add_handler(ChatJoinRequestHandler(handle_join_request))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 
-    logger.info("Bot is running with silent start and strict DM-only command settings...")
+    logger.info("Bot is running with fully silent non-admin and group command rules...")
     application.run_polling()
 
 if __name__ == "__main__":

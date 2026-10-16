@@ -68,9 +68,15 @@ def save_user_to_db(user_id, username, mobile_number):
 # --- HANDLERS ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ignores /start command entirely to prevent any unwanted bot spam."""
-    # Deliberately left blank so the bot never replies when a user starts it.
-    return
+    """Handles /start command strictly in Private Chat (DM). Ignored in groups."""
+    chat = update.effective_chat
+    if chat.type != "private":
+        return
+
+    await update.message.reply_text(
+        "👋 Welcome! You are now connected to the verification bot.\n\n"
+        "To join our group, please submit a join request through the official group link."
+    )
 
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Triggers only when a user requests to join the group via invite link."""
@@ -100,13 +106,18 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=reply_markup,
         )
     except Exception as e:
-        logger.error(f"Failed to DM user {user.id}: {e}")
+        logger.error(f"Failed to DM user {user.id} (Did they start the bot?): {e}")
 
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the contact shared by the user."""
+    """Handles the contact shared by the user in DM."""
     message = update.message
+    chat = update.effective_chat
     user = message.from_user
     contact = message.contact
+
+    # Ignore contact shares if done inside a group chat
+    if chat.type != "private":
+        return
 
     if contact and contact.user_id == user.id:
         user_id = user.id
@@ -118,7 +129,6 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
             full_name = user.full_name or "Unknown User"
             username_handle = f"@{user.username}" if user.username else ""
             
-            # Combine handle and display name to preserve unique fonts, symbols, and emojis safely
             if username_handle:
                 display_username = f"{full_name} ({username_handle})"
             else:
@@ -170,7 +180,6 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Ensure command is sent strictly via Private Chat (DM), not inside a group
     if chat.type != "private":
-        # Silently ignore or delete command attempts inside public groups to protect owner privacy
         return
 
     # Check admin authorization
@@ -217,7 +226,6 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption="📊 Here is the latest list of verified group members."
             )
     except Exception as e:
-    # Clean up local file copy
         logger.error(f"Failed to send Excel file: {e}")
         await message.reply_text("⚠️ Failed to generate or send the spreadsheet file.")
         
@@ -237,7 +245,7 @@ def main():
     application.add_handler(ChatJoinRequestHandler(handle_join_request))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 
-    logger.info("Bot is running with silent start and strict DM admin command settings...")
+    logger.info("Bot is running with strict DM-only commands and join request handling...")
     application.run_polling()
 
 if __name__ == "__main__":

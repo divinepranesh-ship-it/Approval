@@ -68,15 +68,8 @@ def save_user_to_db(user_id, username, mobile_number):
 # --- HANDLERS ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles /start command strictly in Private Chat (DM). Ignored in groups."""
-    chat = update.effective_chat
-    if chat.type != "private":
-        return
-
-    await update.message.reply_text(
-        "👋 Welcome! You are now connected to the verification bot.\n\n"
-        "To join our group, please submit a join request through the official group link."
-    )
+    """Completely silent /start command handler. Sends zero messages."""
+    return
 
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Triggers only when a user requests to join the group via invite link."""
@@ -245,7 +238,7 @@ def main():
     application.add_handler(ChatJoinRequestHandler(handle_join_request))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 
-    logger.info("Bot is running with strict DM-only commands and join request handling...")
+    logger.info("Bot is running with silent start and strict DM-only command settings...")
     application.run_polling()
 
 if __name__ == "__main__":
